@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  # Development environment with Jupyter
+  jupyter:
+    build:
+      context: .
+      target: development
+    container_name: olpa_jupyter
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./src:/app/src
+      - ./notebooks:/app/notebooks
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./mlruns:/app/mlruns
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+    networks:
+      - olpa_network
+
+  # MLflow tracking server
+  mlflow:
+    build:
+      context: .
+      target: base
+    container_name: olpa_mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlruns:/app/mlruns
+    command: >
+      mlflow server
+      --backend-store-uri sqlite:///mlruns/mlflow.db
+      --default-artifact-root ./mlruns/artifacts
+      --host 0.0.0.0
+      --port 5000
+    networks:
+      - olpa_network
+
+  # Training service
+  training:
+    build:
+      context: .
+      target: training
+    container_name: olpa_training
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./mlruns:/app/mlruns
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    depends_on:
+      - mlflow
+    networks:
+      - olpa_network
+
+  # PostgreSQL database (for production)
+  postgres:
+    image: postgres:15-alpine
+    container_name: olpa_postgres
+    environment:
+      - POSTGRES_DB=olpa_warehouse
+      - POSTGRES_USER=olpa_user
+      - POSTGRES_PASSWORD=olpa_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./src/data_engineering/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    networks:
+      - olpa_network
+
+  # FastAPI service (for Sprint 4)
+  api:
+    build:
+      context: .
+      target: api
+    container_name: olpa_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src/api:/app/src/api
+      - ./config:/app/config
+      - ./mlruns:/app/mlruns
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=olpa_warehouse
+      - DB_USER=olpa_user
+      - DB_PASSWORD=olpa_password
+    depends_on:
+      - mlflow
+      - postgres
+    networks:
+      - olpa_network
+
+networks:
+  olpa_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
