@@ -1,0 +1,125 @@
+# MLflow Configuration for OLPA Project
+# Experiment tracking and model management
+
+mlflow:
+  # Tracking server configuration
+  tracking:
+    backend_uri: "sqlite:///mlruns/mlflow.db"  # Local SQLite (can be PostgreSQL in production)
+    artifact_location: "mlruns/artifacts"      # Local filesystem (can be S3/Azure Blob)
+    default_experiment_name: "olpa_predictive_maintenance"
+
+  # Model registry configuration
+  registry:
+    enabled: true
+    default_model_name: "aircraft_failure_predictor"
+    staging_enabled: true  # Enable staging → production workflow
+
+  # Autologging settings
+  autolog:
+    sklearn: true    # Auto-log scikit-learn models
+    tensorflow: true # Auto-log TensorFlow models
+    log_models: true # Automatically log model artifacts
+    log_input_examples: true
+    log_model_signatures: true
+
+  # Run configuration
+  run:
+    tags:
+      project: "OLPA"
+      team: "data_science"
+      framework_version: "1.0.0"
+    nested_runs: true  # Enable nested runs for hyperparameter tuning
+
+# Experiment configurations
+experiments:
+  baseline_models:
+    name: "baseline_models"
+    description: "Baseline models (Logistic Regression, Decision Tree)"
+    tags:
+      sprint: "sprint_1"
+      model_type: "baseline"
+
+  random_forest:
+    name: "random_forest_optimization"
+    description: "Random Forest hyperparameter tuning"
+    tags:
+      sprint: "sprint_3"
+      model_type: "ensemble"
+
+  xgboost:
+    name: "xgboost_optimization"
+    description: "XGBoost gradient boosting models"
+    tags:
+      sprint: "sprint_3"
+      model_type: "gradient_boosting"
+
+  lstm:
+    name: "lstm_time_series"
+    description: "LSTM models for temporal patterns"
+    tags:
+      sprint: "sprint_3"
+      model_type: "deep_learning"
+
+# Model evaluation metrics
+metrics:
+  primary:
+    - name: "f1_score"
+      greater_is_better: true
+      threshold: 0.85  # Target: 85%+
+    - name: "recall"
+      greater_is_better: true
+      threshold: 0.85
+    - name: "precision"
+      greater_is_better: true
+      threshold: 0.75
+
+  secondary:
+    - "accuracy"
+    - "roc_auc"
+    - "average_precision"
+    - "confusion_matrix"
+
+# Model artifacts to log
+artifacts:
+  - "model_pkl"           # Serialized model
+  - "feature_importance"  # Feature importance plot
+  - "confusion_matrix"    # Confusion matrix plot
+  - "roc_curve"          # ROC curve plot
+  - "precision_recall_curve" # PR curve
+  - "training_history"    # Training metrics over time
+  - "predictions_sample"  # Sample predictions
+
+# Model signature schema
+model_signature:
+  input_schema:
+    - name: "temperature"
+      type: "double"
+    - name: "vibration"
+      type: "double"
+    - name: "pressure"
+      type: "double"
+    - name: "rpm"
+      type: "double"
+    # Additional features will be added during feature engineering
+
+  output_schema:
+    - name: "failure_probability"
+      type: "double"
+    - name: "prediction"
+      type: "long"
+
+# Model versioning
+versioning:
+  version_format: "v{major}.{minor}.{patch}"
+  auto_increment: true
+  production_alias: "production"
+  staging_alias: "staging"
+
+# Production model promotion criteria
+promotion_criteria:
+  min_f1_score: 0.85
+  min_recall: 0.85
+  min_precision: 0.75
+  max_inference_time_ms: 100
+  min_data_quality_score: 0.90
+  require_approval: false  # Set to true for manual approval

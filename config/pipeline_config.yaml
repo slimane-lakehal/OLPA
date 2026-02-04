@@ -1,0 +1,958 @@
+# =============================================================================
+# OLPA Pipeline Configuration
+# Optimisation Logistique & Prédictive Aéronautique
+# =============================================================================
+# Purpose: Centralized configuration for all data pipelines and ML workflows
+# Version: 1.0
+# Last Updated: 05/02/2026
+# =============================================================================
+
+# =============================================================================
+# ENVIRONMENT CONFIGURATION
+# =============================================================================
+environment:
+  # Current deployment environment
+  name: "development"  # Options: development, staging, production
+
+  # Cloud platform (for cloud-agnostic design)
+  cloud_provider: "aws"  # Options: aws, azure, gcp, local
+
+  # Region/Location
+  region: "us-east-1"
+
+  # Logging configuration
+  logging:
+    level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    format: "json"  # Options: json, text
+    output: "stdout"  # Options: stdout, file, cloud_logging
+    log_file_path: "/var/log/olpa/pipeline.log"
+    retention_days: 30
+
+# =============================================================================
+# DATA SOURCE CONFIGURATIONS
+# =============================================================================
+data_sources:
+
+  # Sensor Data Source
+  sensor_data:
+    enabled: true
+    source_type: "file"  # Options: file, s3, azure_blob, database, api
+
+    # File-based configuration (for MVP)
+    file_config:
+      input_path: "/home/slim/OLPA/data/raw/sensor_data"
+      file_pattern: "sensor_*.csv"
+      file_format: "csv"  # Options: csv, parquet, json
+      encoding: "utf-8"
+      compression: null  # Options: null, gzip, snappy, bzip2
+
+    # Cloud storage configuration (for production)
+    cloud_config:
+      aws:
+        bucket: "olpa-raw-data"
+        prefix: "sensor_data/"
+        region: "us-east-1"
+      azure:
+        container: "raw-data"
+        blob_prefix: "sensor_data/"
+        storage_account: "olpastorage"
+
+    # Schema validation
+    schema:
+      strict_mode: false  # Fail on schema mismatch
+      required_columns:
+        - aircraft_id
+        - sensor_id
+        - sensor_type
+        - measurement_timestamp
+        - measurement_value
+      data_types:
+        aircraft_id: "string"
+        sensor_id: "string"
+        sensor_type: "string"
+        measurement_timestamp: "datetime"
+        measurement_value: "float"
+        measurement_unit: "string"
+
+    # Ingestion settings
+    ingestion:
+      batch_size: 10000  # Records per batch
+      parallel_workers: 4
+      error_threshold: 0.05  # Max 5% errors allowed
+      error_handling: "log_and_continue"  # Options: fail_fast, log_and_continue, quarantine
+
+  # Maintenance Records Source
+  maintenance_records:
+    enabled: true
+    source_type: "file"
+
+    file_config:
+      input_path: "/home/slim/OLPA/data/raw/maintenance"
+      file_pattern: "maintenance_*.csv"
+      file_format: "csv"
+      encoding: "utf-8"
+
+    schema:
+      required_columns:
+        - aircraft_id
+        - maintenance_type
+        - maintenance_action
+        - actual_start_date
+      data_types:
+        aircraft_id: "string"
+        component_id: "string"
+        maintenance_type: "string"
+        maintenance_action: "string"
+        failure_occurred: "boolean"
+        actual_start_date: "datetime"
+        actual_end_date: "datetime"
+        labor_hours: "float"
+
+    ingestion:
+      batch_size: 1000
+      parallel_workers: 2
+      error_threshold: 0.01
+
+  # Inventory/Logistics Source
+  inventory_data:
+    enabled: true
+    source_type: "file"
+
+    file_config:
+      input_path: "/home/slim/OLPA/data/raw/inventory"
+      file_pattern: "inventory_*.csv"
+      file_format: "csv"
+      encoding: "utf-8"
+
+    schema:
+      required_columns:
+        - part_number
+        - snapshot_date
+        - quantity_on_hand
+      data_types:
+        part_number: "string"
+        part_name: "string"
+        quantity_on_hand: "integer"
+        quantity_reserved: "integer"
+        unit_cost: "float"
+        snapshot_date: "date"
+
+    ingestion:
+      batch_size: 5000
+      parallel_workers: 2
+
+  # Aircraft Metadata Source
+  aircraft_metadata:
+    enabled: true
+    source_type: "file"
+
+    file_config:
+      input_path: "/home/slim/OLPA/data/raw/metadata"
+      file_pattern: "aircraft_*.csv"
+      file_format: "csv"
+      encoding: "utf-8"
+
+    schema:
+      required_columns:
+        - aircraft_id
+        - aircraft_type
+        - manufacturer
+      data_types:
+        aircraft_id: "string"
+        aircraft_type: "string"
+        manufacturer: "string"
+        serial_number: "string"
+        manufacture_date: "date"
+        total_flight_hours: "float"
+
+# =============================================================================
+# DATABASE CONFIGURATION
+# =============================================================================
+database:
+  # Primary data warehouse connection
+  warehouse:
+    engine: "postgresql"  # Options: postgresql, mysql, snowflake, bigquery
+
+    # Connection parameters (use environment variables in production)
+    connection:
+      host: "${DB_HOST:-localhost}"
+      port: "${DB_PORT:-5432}"
+      database: "${DB_NAME:-olpa_warehouse}"
+      username: "${DB_USER:-olpa_user}"
+      password: "${DB_PASSWORD:-changeme}"  # Use secrets manager in production
+
+    # Connection pool settings
+    pool:
+      min_size: 2
+      max_size: 10
+      timeout: 30
+      max_overflow: 5
+
+    # Query settings
+    query:
+      timeout_seconds: 300
+      statement_timeout: "5min"
+
+  # Optional: Separate read replica for analytics
+  analytics_replica:
+    enabled: false
+    connection:
+      host: "${DB_REPLICA_HOST:-localhost}"
+      port: 5432
+      database: "${DB_NAME:-olpa_warehouse}"
+      read_only: true
+
+# =============================================================================
+# DATA QUALITY RULES
+# =============================================================================
+data_quality:
+
+  # Sensor data quality checks
+  sensor_data_checks:
+
+    # Completeness checks
+    completeness:
+      - check_name: "required_fields_present"
+        columns: ["aircraft_id", "sensor_id", "measurement_timestamp", "measurement_value"]
+        threshold: 1.0  # 100% completeness required
+        severity: "critical"
+
+      - check_name: "non_null_values"
+        columns: ["measurement_value"]
+        threshold: 0.95  # 95% non-null values required
+        severity: "warning"
+
+    # Validity checks
+    validity:
+      - check_name: "temperature_range"
+        column: "measurement_value"
+        condition: "sensor_type = 'temperature'"
+        min_value: -50
+        max_value: 200
+        unit: "celsius"
+        severity: "warning"
+
+      - check_name: "vibration_range"
+        column: "measurement_value"
+        condition: "sensor_type = 'vibration'"
+        min_value: 0
+        max_value: 100
+        unit: "m/s2"
+        severity: "warning"
+
+      - check_name: "pressure_range"
+        column: "measurement_value"
+        condition: "sensor_type = 'pressure'"
+        min_value: 0
+        max_value: 1000
+        unit: "bar"
+        severity: "warning"
+
+      - check_name: "timestamp_in_range"
+        column: "measurement_timestamp"
+        min_value: "2020-01-01"
+        max_value: "current_date + 1 day"
+        severity: "critical"
+
+    # Consistency checks
+    consistency:
+      - check_name: "no_duplicate_records"
+        columns: ["aircraft_id", "sensor_id", "measurement_timestamp"]
+        threshold: 0.01  # Max 1% duplicates
+        severity: "warning"
+
+      - check_name: "timestamp_order"
+        column: "measurement_timestamp"
+        order: "ascending"
+        severity: "warning"
+
+    # Timeliness checks
+    timeliness:
+      - check_name: "data_freshness"
+        max_age_hours: 48
+        severity: "critical"
+
+  # Maintenance records quality checks
+  maintenance_checks:
+    completeness:
+      - check_name: "required_fields"
+        columns: ["aircraft_id", "maintenance_type", "actual_start_date"]
+        threshold: 1.0
+        severity: "critical"
+
+    validity:
+      - check_name: "date_logic"
+        check: "actual_end_date >= actual_start_date"
+        severity: "critical"
+
+      - check_name: "labor_hours_positive"
+        column: "labor_hours"
+        min_value: 0
+        max_value: 200
+        severity: "warning"
+
+# =============================================================================
+# TRANSFORMATION RULES
+# =============================================================================
+transformations:
+
+  # Bronze to Silver transformations
+  bronze_to_silver:
+
+    # Sensor data transformations
+    sensor_data:
+
+      # Missing value handling
+      missing_values:
+        strategy: "context_based"  # Options: drop, fill_forward, fill_median, interpolate
+        rules:
+          - column: "measurement_value"
+            gap_threshold_minutes: 60  # Max gap to fill
+            method: "forward_fill"
+            max_consecutive_fills: 5
+          - column: "measurement_value"
+            gap_threshold_minutes: 1440  # 24 hours
+            method: "median"
+            window_hours: 24
+
+      # Outlier detection
+      outlier_detection:
+        enabled: true
+        method: "iqr"  # Options: iqr, zscore, isolation_forest
+        iqr_multiplier: 3.0
+        zscore_threshold: 3.5
+        action: "flag"  # Options: remove, flag, cap
+        flag_column: "is_outlier"
+
+      # Unit standardization
+      unit_conversion:
+        temperature:
+          source_units: ["fahrenheit", "celsius", "kelvin"]
+          target_unit: "celsius"
+          conversions:
+            fahrenheit: "(value - 32) * 5/9"
+            kelvin: "value - 273.15"
+
+        pressure:
+          source_units: ["psi", "bar", "pascal"]
+          target_unit: "bar"
+          conversions:
+            psi: "value * 0.0689476"
+            pascal: "value / 100000"
+
+      # Timestamp normalization
+      timestamp_handling:
+        target_timezone: "UTC"
+        parse_formats:
+          - "%Y-%m-%d %H:%M:%S"
+          - "%Y-%m-%dT%H:%M:%S"
+          - "%Y-%m-%d %H:%M:%S.%f"
+
+    # Maintenance records transformations
+    maintenance_records:
+
+      # Categorization
+      categorization:
+        failure_severity:
+          rules:
+            - condition: "downtime_hours > 48"
+              value: "critical"
+            - condition: "downtime_hours > 24"
+              value: "major"
+            - condition: "downtime_hours > 4"
+              value: "minor"
+            - default: "negligible"
+
+        component_type:
+          mapping_file: "/home/slim/OLPA/config/component_taxonomy.csv"
+          fallback: "unknown"
+
+      # Calculated fields
+      calculated_fields:
+        - name: "duration_hours"
+          formula: "(actual_end_date - actual_start_date).total_seconds() / 3600"
+        - name: "downtime_hours"
+          formula: "duration_hours if maintenance_type in ['corrective', 'unscheduled'] else 0"
+
+  # Silver to Gold transformations
+  silver_to_gold:
+
+    # Aggregation settings
+    aggregation:
+      time_windows:
+        - "1H"   # 1 hour
+        - "3H"   # 3 hours
+        - "6H"   # 6 hours
+        - "12H"  # 12 hours
+        - "24H"  # 24 hours
+        - "7D"   # 7 days
+
+      statistics:
+        - "mean"
+        - "std"
+        - "min"
+        - "max"
+        - "median"
+        - "percentile_25"
+        - "percentile_75"
+
+# =============================================================================
+# FEATURE ENGINEERING CONFIGURATION
+# =============================================================================
+feature_engineering:
+
+  # Feature version (for tracking and reproducibility)
+  version: "1.0"
+
+  # Time-series features
+  time_series_features:
+
+    # Rolling statistics
+    rolling_statistics:
+      enabled: true
+      windows: [3, 6, 12, 24]  # Hours
+      statistics: ["mean", "std", "min", "max"]
+      sensors:
+        - "temperature"
+        - "vibration"
+        - "pressure"
+        - "rpm"
+
+    # Trend detection
+    trend_features:
+      enabled: true
+      windows: [3, 12, 24]  # Hours
+      methods:
+        - "linear_regression_slope"
+        - "rate_of_change"
+        - "direction_categorical"  # increasing/decreasing/stable
+      threshold_stable: 0.01  # Less than 1% change = stable
+
+    # Lag features
+    lag_features:
+      enabled: true
+      lags: [1, 3, 6, 12, 24]  # Hours
+      sensors: ["temperature", "vibration"]
+
+    # Statistical features
+    statistical_features:
+      enabled: true
+      features:
+        - "coefficient_of_variation"
+        - "skewness"
+        - "kurtosis"
+        - "entropy"
+      window_hours: 24
+
+  # Domain-specific features
+  domain_features:
+
+    # Maintenance context
+    maintenance_context:
+      - name: "days_since_last_maintenance"
+        calculation: "current_date - last_maintenance_date"
+
+      - name: "days_until_next_scheduled"
+        calculation: "next_scheduled_maintenance_date - current_date"
+
+      - name: "maintenance_frequency_30d"
+        calculation: "count_maintenance_events_last_30_days"
+
+      - name: "failure_history_indicator"
+        calculation: "count_failures_last_90_days > 0"
+
+    # Operational context
+    operational_context:
+      - name: "cumulative_operating_hours"
+        source: "aircraft_metadata"
+
+      - name: "flight_cycles_since_maintenance"
+        calculation: "current_cycles - cycles_at_last_maintenance"
+
+      - name: "utilization_rate"
+        calculation: "flight_hours_last_30d / 30"
+
+    # Anomaly features
+    anomaly_features:
+      method: "isolation_forest"  # Options: isolation_forest, autoencoder, statistical
+      contamination: 0.05  # Expected proportion of anomalies
+      n_estimators: 100
+      max_samples: 256
+
+  # Feature selection
+  feature_selection:
+    enabled: true
+    method: "recursive"  # Options: recursive, lasso, mutual_info, manual
+    max_features: 50
+    correlation_threshold: 0.95  # Remove highly correlated features
+    variance_threshold: 0.01  # Remove low-variance features
+
+  # Feature scaling
+  feature_scaling:
+    method: "standard"  # Options: standard, minmax, robust, none
+    fit_on_train_only: true
+
+# =============================================================================
+# MODEL TRAINING CONFIGURATION
+# =============================================================================
+model_training:
+
+  # Target variable definition
+  target:
+    name: "failure_within_7_days"
+    definition: "Binary indicator of failure within next 7 days"
+    positive_class: 1
+    negative_class: 0
+
+  # Dataset preparation
+  dataset:
+
+    # Train/test split
+    split:
+      method: "time_based"  # Options: time_based, random, stratified
+      train_ratio: 0.8
+      validation_ratio: 0.1
+      test_ratio: 0.1
+
+      # For time-based split
+      split_date: "2024-10-01"  # Or "auto" for automatic split
+
+      # Ensure no data leakage
+      gap_days: 7  # Gap between train and test to prevent leakage
+
+    # Class imbalance handling
+    imbalance_handling:
+      method: "smote"  # Options: smote, undersample, oversample, class_weights, none
+      sampling_strategy: 0.5  # Ratio of minority to majority class
+
+      # Alternative: Class weights
+      class_weights:
+        enabled: false
+        weights: "balanced"  # Or custom: {0: 1, 1: 10}
+
+  # Model algorithms to train
+  algorithms:
+
+    # Random Forest (baseline)
+    random_forest:
+      enabled: true
+      library: "scikit-learn"
+      hyperparameters:
+        n_estimators: 100
+        max_depth: 20
+        min_samples_split: 5
+        min_samples_leaf: 2
+        max_features: "sqrt"
+        class_weight: "balanced"
+        random_state: 42
+        n_jobs: -1
+
+      # Hyperparameter tuning
+      tune_hyperparameters: true
+      tuning_method: "randomized_search"  # Options: grid_search, randomized_search, bayesian
+      param_grid:
+        n_estimators: [50, 100, 200, 300]
+        max_depth: [10, 20, 30, null]
+        min_samples_split: [2, 5, 10]
+        min_samples_leaf: [1, 2, 4]
+        max_features: ["sqrt", "log2"]
+      cv_folds: 5
+      n_iterations: 50
+
+    # Gradient Boosting (XGBoost)
+    xgboost:
+      enabled: true
+      library: "xgboost"
+      hyperparameters:
+        n_estimators: 100
+        max_depth: 6
+        learning_rate: 0.1
+        subsample: 0.8
+        colsample_bytree: 0.8
+        scale_pos_weight: 10  # For class imbalance
+        random_state: 42
+        n_jobs: -1
+
+      tune_hyperparameters: true
+      param_grid:
+        n_estimators: [100, 200, 300]
+        max_depth: [3, 6, 9]
+        learning_rate: [0.01, 0.05, 0.1, 0.3]
+        subsample: [0.7, 0.8, 0.9]
+        colsample_bytree: [0.7, 0.8, 0.9]
+      cv_folds: 5
+      n_iterations: 50
+
+    # LSTM (for time-series deep learning)
+    lstm:
+      enabled: false  # Disabled for MVP, enable for advanced modeling
+      library: "tensorflow"  # Or "pytorch"
+      architecture:
+        sequence_length: 24  # Hours of history
+        lstm_units: [64, 32]
+        dropout: 0.2
+        dense_layers: [16]
+        activation: "relu"
+        output_activation: "sigmoid"
+
+      training:
+        epochs: 50
+        batch_size: 32
+        optimizer: "adam"
+        learning_rate: 0.001
+        early_stopping:
+          enabled: true
+          patience: 5
+          monitor: "val_loss"
+
+  # Model evaluation
+  evaluation:
+
+    # Primary metrics
+    primary_metric: "f1_score"  # Metric to optimize
+
+    # All metrics to track
+    metrics:
+      - "accuracy"
+      - "precision"
+      - "recall"
+      - "f1_score"
+      - "roc_auc"
+      - "pr_auc"
+      - "confusion_matrix"
+
+    # Cross-validation
+    cross_validation:
+      enabled: true
+      method: "time_series_split"  # Options: k_fold, stratified_k_fold, time_series_split
+      n_splits: 5
+      shuffle: false  # Don't shuffle for time-series
+
+    # Performance thresholds
+    thresholds:
+      minimum_f1_score: 0.85
+      minimum_recall: 0.80  # Critical: Don't miss failures
+      maximum_false_positive_rate: 0.30
+
+    # Feature importance
+    feature_importance:
+      enabled: true
+      method: "permutation"  # Options: built_in, permutation, shap
+      top_n: 20
+
+  # Model persistence
+  model_registry:
+    enabled: true
+    backend: "mlflow"  # Options: mlflow, custom, local
+
+    mlflow_config:
+      tracking_uri: "file:///home/slim/OLPA/mlruns"  # Or remote server
+      experiment_name: "olpa_predictive_maintenance"
+      artifact_location: "/home/slim/OLPA/models/artifacts"
+
+    # Model versioning
+    versioning:
+      auto_increment: true
+      naming_convention: "olpa_model_v{version}_{timestamp}"
+
+    # Metadata to store
+    metadata:
+      - "training_date"
+      - "data_version"
+      - "feature_version"
+      - "hyperparameters"
+      - "performance_metrics"
+      - "feature_importance"
+      - "training_duration"
+      - "dataset_size"
+
+# =============================================================================
+# BATCH PREDICTION CONFIGURATION
+# =============================================================================
+batch_prediction:
+
+  # Schedule
+  schedule:
+    enabled: true
+    frequency: "daily"  # Options: hourly, daily, weekly
+    time: "02:00"  # UTC time
+
+  # Prediction settings
+  prediction:
+    # Prediction window
+    forecast_horizon_days: 7
+
+    # Confidence thresholds
+    risk_level_thresholds:
+      critical: 0.75
+      high: 0.50
+      medium: 0.25
+      low: 0.0
+
+    # Model selection
+    model_selection: "champion"  # Options: champion, latest, specific_version
+    fallback_model: "previous_champion"  # If primary fails
+
+  # Output settings
+  output:
+    save_to_database: true
+    save_to_file: true
+    file_format: "parquet"
+    file_path: "/home/slim/OLPA/data/predictions"
+
+# =============================================================================
+# API CONFIGURATION
+# =============================================================================
+api:
+
+  # Server settings
+  server:
+    host: "0.0.0.0"
+    port: 8000
+    workers: 4
+    timeout: 60
+
+  # Model serving
+  model_serving:
+    model_cache: true
+    cache_size_mb: 1024
+    model_reload_interval_minutes: 60
+
+  # Request/Response
+  request:
+    max_payload_mb: 10
+    rate_limit_requests_per_minute: 1000
+
+  response:
+    include_feature_importance: false
+    include_confidence_intervals: true
+    decimal_precision: 4
+
+  # Authentication (for production)
+  authentication:
+    enabled: false
+    method: "api_key"  # Options: api_key, oauth2, jwt
+    api_key_header: "X-API-Key"
+
+# =============================================================================
+# ALERTING CONFIGURATION
+# =============================================================================
+alerting:
+
+  # Alert generation rules
+  rules:
+
+    # Predictive failure alerts
+    predictive_failure:
+      enabled: true
+      conditions:
+        - name: "critical_failure_risk"
+          condition: "failure_probability >= 0.75"
+          severity: "critical"
+          recommended_action: "Schedule immediate maintenance inspection"
+          notify_channels: ["email", "slack"]
+
+        - name: "high_failure_risk"
+          condition: "failure_probability >= 0.50"
+          severity: "high"
+          recommended_action: "Schedule maintenance within 48 hours"
+          notify_channels: ["email"]
+
+        - name: "medium_failure_risk"
+          condition: "failure_probability >= 0.25"
+          severity: "medium"
+          recommended_action: "Monitor and plan maintenance within 7 days"
+          notify_channels: ["dashboard"]
+
+    # Sensor threshold alerts
+    sensor_threshold:
+      enabled: true
+      thresholds:
+        temperature_critical:
+          sensor_type: "temperature"
+          threshold: 150
+          operator: ">="
+          severity: "critical"
+
+        vibration_high:
+          sensor_type: "vibration"
+          threshold: 80
+          operator: ">="
+          severity: "high"
+
+    # Data quality alerts
+    data_quality:
+      enabled: true
+      conditions:
+        - name: "data_freshness_breach"
+          condition: "hours_since_last_data > 48"
+          severity: "critical"
+
+        - name: "high_error_rate"
+          condition: "error_rate > 0.10"
+          severity: "high"
+
+  # Notification channels
+  notifications:
+
+    email:
+      enabled: false
+      smtp_host: "smtp.gmail.com"
+      smtp_port: 587
+      sender: "olpa-alerts@example.com"
+      recipients:
+        - "maintenance-team@example.com"
+
+    slack:
+      enabled: false
+      webhook_url: "${SLACK_WEBHOOK_URL}"
+      channel: "#olpa-alerts"
+
+    dashboard:
+      enabled: true
+      auto_refresh: true
+
+# =============================================================================
+# MONITORING CONFIGURATION
+# =============================================================================
+monitoring:
+
+  # Pipeline monitoring
+  pipeline:
+    enabled: true
+    metrics:
+      - "execution_time"
+      - "records_processed"
+      - "error_rate"
+      - "data_quality_score"
+
+    # Alerting thresholds
+    thresholds:
+      max_execution_time_minutes: 120
+      max_error_rate: 0.05
+      min_quality_score: 0.90
+
+  # Model monitoring
+  model:
+    enabled: true
+
+    # Model drift detection
+    drift_detection:
+      enabled: true
+      methods:
+        - "psi"  # Population Stability Index
+        - "ks"   # Kolmogorov-Smirnov
+
+      # Feature drift
+      feature_drift:
+        check_frequency: "daily"
+        psi_threshold: 0.2
+
+      # Prediction drift
+      prediction_drift:
+        check_frequency: "daily"
+        distribution_check: true
+
+      # Performance degradation
+      performance_degradation:
+        check_frequency: "weekly"
+        baseline_f1_threshold: 0.75  # Alert if F1 < 75% of baseline
+
+    # Model retraining triggers
+    retraining_triggers:
+      - "performance_degradation"
+      - "significant_drift"
+      - "manual_trigger"
+      - "scheduled_monthly"
+
+  # System monitoring
+  system:
+    enabled: true
+    metrics:
+      - "cpu_usage"
+      - "memory_usage"
+      - "disk_usage"
+      - "database_connections"
+
+    collection_interval_seconds: 60
+
+# =============================================================================
+# RETENTION POLICIES
+# =============================================================================
+retention:
+
+  # Bronze layer (raw data)
+  bronze:
+    sensor_data: 730  # 2 years in days
+    maintenance_records: 1825  # 5 years
+    inventory_data: 730  # 2 years
+
+  # Silver layer (cleaned data)
+  silver:
+    all_tables: 1095  # 3 years
+
+  # Gold layer (features and predictions)
+  gold:
+    features: 730  # 2 years
+    predictions: 1825  # 5 years (compliance)
+    training_datasets: 365  # 1 year
+
+  # Logs and monitoring
+  logs:
+    pipeline_logs: 90  # 90 days
+    application_logs: 30  # 30 days
+    monitoring_metrics: 180  # 6 months
+
+# =============================================================================
+# PERFORMANCE OPTIMIZATION
+# =============================================================================
+performance:
+
+  # Caching
+  caching:
+    enabled: true
+    backend: "redis"  # Options: redis, memcached, local
+    ttl_seconds: 3600
+
+  # Parallel processing
+  parallel:
+    max_workers: 4
+    chunk_size: 10000
+
+  # Database optimization
+  database:
+    use_bulk_insert: true
+    batch_size: 5000
+    use_connection_pooling: true
+    enable_query_cache: true
+
+# =============================================================================
+# COST OPTIMIZATION
+# =============================================================================
+cost_optimization:
+
+  # Storage tiering
+  storage_tiering:
+    enabled: true
+    tiers:
+      hot:
+        days: 30
+        storage_class: "standard"
+
+      warm:
+        days: 180
+        storage_class: "infrequent_access"
+
+      cold:
+        days: 730
+        storage_class: "glacier"
+
+  # Compute optimization
+  compute:
+    use_spot_instances: true  # For batch jobs
+    auto_scaling: true
+    scale_down_after_minutes: 30
+
+# =============================================================================
+# END OF CONFIGURATION
+# =============================================================================
