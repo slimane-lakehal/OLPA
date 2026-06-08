@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Data
+data/raw/*
+data/processed/*
+data/warehouse/*
+*.csv
+*.parquet
+*.h5
+*.pkl
+
+# Models
+*.h5
+*.pkl
+*.joblib
+mlruns/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Git
+.git
+.gitignore

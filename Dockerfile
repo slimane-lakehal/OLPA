@@ -1,10 +1,9 @@
 # OLPA - Predictive Maintenance ML Environment
 # Multi-stage Docker build for development and production
 
-# Base stage with Python and dependencies
-FROM python:3.12-slim as base
+# Base stage with Python and uv
+FROM python:3.12-slim AS base
 
-# Set working directory
 WORKDIR /app
 
 # Install system dependencies
@@ -14,60 +13,62 @@ RUN apt-get update && apt-get install -y \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency files for `uv` package manager
-COPY pyproject.toml uv.lock .
+# Install uv package manager
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Install the `uv` package manager, then use it to sync pinned deps
-# Note: `pyproject.toml` / `uv.lock` require Python >= 3.12.
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir uv && \
-    uv sync --no-dev
+# Copy dependency files
+COPY pyproject.toml uv.lock ./
 
 # Development stage
-FROM base as development
+FROM base AS development
 
-# Install additional dev dependencies
-RUN pip install --no-cache-dir \
-    ipython \
-    jupyterlab \
-    black \
-    flake8 \
-    pytest
+# Sync all dependencies (creates .venv)
+RUN uv sync
 
 # Copy project files
 COPY . .
 
+# Add .venv to PATH so all commands use the venv Python
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH=/app
+
 # Expose ports for Jupyter and MLflow
 EXPOSE 8888 5000
 
-# Default command for development
-CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root"]
+# Default command for development (token disabled for local dev convenience)
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--ServerApp.token=''"]
 
 # Production stage for ML training
-FROM base as training
+FROM base AS training
+
+# Sync only production dependencies
+RUN uv sync --no-dev
 
 # Copy only necessary files
 COPY src/ src/
 COPY config/ config/
 COPY data/ data/
 
-# Set Python path
+# Add .venv to PATH
+ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH=/app
 
 # Default command for training
 CMD ["python", "src/ml_models/train.py"]
 
 # Production stage for API serving
-FROM base as api
+FROM base AS api
+
+# Sync only production dependencies
+RUN uv sync --no-dev
 
 # Copy API code
 COPY src/api/ src/api/
 COPY config/ config/
 
-# Install additional API dependencies
-RUN pip install --no-cache-dir \
-    fastapi==0.109.0 \
-    uvicorn==0.25.0
+# Add .venv to PATH
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH=/app
 
 # Expose API port
 EXPOSE 8000

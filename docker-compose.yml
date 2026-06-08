@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Development environment with Jupyter
   jupyter:
@@ -31,11 +29,7 @@ services:
     volumes:
       - ./mlruns:/app/mlruns
     command: >
-      mlflow server
-      --backend-store-uri sqlite:///mlruns/mlflow.db
-      --default-artifact-root ./mlruns/artifacts
-      --host 0.0.0.0
-      --port 5000
+      mlflow server --backend-store-uri sqlite:///mlruns/mlflow.db --default-artifact-root ./mlruns/artifacts --host 0.0.0.0 --port 5000
     networks:
       - olpa_network
 
